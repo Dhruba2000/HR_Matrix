@@ -1,124 +1,94 @@
 import streamlit as st
 import pandas as pd
-import io
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, Border, Side
+from openpyxl.utils.dataframe import dataframe_to_rows
+from io import BytesIO
 
-st.set_page_config(page_title="Employee Classification Matrix", page_icon="📊")
 
-st.title("📊 Employee Classification System")
-st.write("Upload an Excel file with columns: **Name, Discipline, Attendance**")
+def generate_output(df):
+    # Clean column names
+    df.columns = [c.strip().lower() for c in df.columns]
 
-uploaded = st.file_uploader("Upload Excel File", type=["xlsx"])
-
-if uploaded:
-
-    df = pd.read_excel(uploaded)
-
-    # Validate required columns
-    required_cols = {"Name", "Discipline", "Attendance"}
-    if not required_cols.issubset(df.columns):
-        st.error(f"Excel must contain columns: {required_cols}")
-        st.stop()
-
-    # Create matrix categories
-    matrix = {
-        (0, 0): [],  # Att=0, Disc=1 (Top-left)
-        (0, 1): [],  # Att=1, Disc=1 (Top-right)
-        (1, 0): [],  # Att=0, Disc=0 (Bottom-left)
-        (1, 1): []   # Att=1, Disc=0 (Bottom-right)
-    }
+    matrix_names = {(0,0):[], (0,1):[], (1,0):[], (1,1):[]}
 
     for _, row in df.iterrows():
-        att = row['Attendance']
-        disc = row['Discipline']
-        name = row['Name']
+        att, disc, name = int(row['attendance']), int(row['discipline']), str(row['name'])
+        if att == 0 and disc == 1: matrix_names[(0,0)].append(name)
+        elif att == 1 and disc == 1: matrix_names[(0,1)].append(name)
+        elif att == 0 and disc == 0: matrix_names[(1,0)].append(name)
+        elif att == 1 and disc == 0: matrix_names[(1,1)].append(name)
 
-        if att == 0 and disc == 1:
-            matrix[(0, 0)].append(name)
-        elif att == 1 and disc == 1:
-            matrix[(0, 1)].append(name)
-        elif att == 0 and disc == 0:
-            matrix[(1, 0)].append(name)
-        else:
-            matrix[(1, 1)].append(name)
+    def classify(r):
+        att, disc = r['attendance'], r['discipline']
+        if att == 0 and disc == 1: return 'Low Attendance, Good Discipline'
+        elif att == 1 and disc == 1: return 'Good Attendance, Good Discipline'
+        elif att == 0 and disc == 0: return 'Low Attendance, Poor Discipline'
+        else: return 'Good Attendance, Poor Discipline'
 
-    # Matrix display DataFrame
-    matrix_df = pd.DataFrame([
-        [', '.join(matrix[(0, 0)]), ', '.join(matrix[(0, 1)])],
-        [', '.join(matrix[(1, 0)]), ', '.join(matrix[(1, 1)])]
-    ],
-    index=[1, 0],
-    columns=[0, 1])
+    df['classification'] = df.apply(classify, axis=1)
 
-    matrix_df.index.name = "Discipline"
-    matrix_df.columns.name = "Attendance"
+    output = BytesIO()
+    wb = Workbook()
+    wb.remove(wb.active)
 
-    # Count matrix
-    count_df = pd.DataFrame([
-        [len(matrix[(0, 0)]), len(matrix[(0, 1)])],
-        [len(matrix[(1, 0)]), len(matrix[(1, 1)])]
-    ],
-    index=[1, 0],
-    columns=[0, 1])
+    ws1 = wb.create_sheet("Employee Details")
+    for r in dataframe_to_rows(df, index=False, header=True): ws1.append(r)
 
-    count_df.index.name = "Discipline"
-    count_df.columns.name = "Attendance"
+    # Matrix Sheet
+    ws2 = wb.create_sheet("Classification Matrix")
+    thin = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+    
+    ws2.merge_cells('B1:C1'); ws2['B1']="Attendance"; ws2['B1'].alignment=Alignment(horizontal='center'); ws2['B1'].font=Font(bold=True)
+    ws2['B2'], ws2['C2'] = '0', '1'
+    for cell in ['B2','C2']: ws2[cell].alignment=Alignment(horizontal='center'); ws2[cell].font=Font(bold=True)
+    ws2.merge_cells('A1:A2'); ws2['A1']="Discipline"; ws2['A1'].alignment=Alignment(horizontal='center'); ws2['A1'].font=Font(bold=True)
 
-    # Classification
-    def classify(row):
-        if row['Attendance'] == 0 and row['Discipline'] == 1:
-            return 'Low Attendance, Good Discipline'
-        elif row['Attendance'] == 1 and row['Discipline'] == 1:
-            return 'Good Attendance, Good Discipline'
-        elif row['Attendance'] == 0 and row['Discipline'] == 0:
-            return 'Low Attendance, Poor Discipline'
-        else:
-            return 'Good Attendance, Poor Discipline'
+    ws2['A3'], ws2['A4'] = '1','0'
+    ws2['B3'], ws2['C3'] = '\n'.join(matrix_names[(0,0)]), '\n'.join(matrix_names[(0,1)])
+    ws2['B4'], ws2['C4'] = '\n'.join(matrix_names[(1,0)]), '\n'.join(matrix_names[(1,1)])
+    for cell in ['B3','C3','B4','C4']: ws2[cell].alignment=Alignment(wrap_text=True, horizontal='center')
 
-    df['Classification'] = df.apply(classify, axis=1)
-
-    # Summary
+    # Summary Sheet
     summary = pd.DataFrame({
-        'Category': [
-            'Total Students',
-            'Good Attendance (1)',
-            'Low Attendance (0)',
-            'Good Discipline (1)',
-            'Poor Discipline (0)',
-            'Both Good (Att=1, Disc=1)',
-            'Both Poor (Att=0, Disc=0)'
-        ],
+        'Category': ['Total','Good Attendance','Low Attendance','Good Discipline','Poor Discipline','Both Good (1,1)','Both Poor (0,0)'],
         'Count': [
             len(df),
-            len(df[df['Attendance'] == 1]),
-            len(df[df['Attendance'] == 0]),
-            len(df[df['Discipline'] == 1]),
-            len(df[df['Discipline'] == 0]),
-            len(df[(df['Attendance'] == 1) & (df['Discipline'] == 1)]),
-            len(df[(df['Attendance'] == 0) & (df['Discipline'] == 0)])
+            len(df[df['attendance']==1]),
+            len(df[df['attendance']==0]),
+            len(df[df['discipline']==1]),
+            len(df[df['discipline']==0]),
+            len(df[(df['attendance']==1)&(df['discipline']==1)]),
+            len(df[(df['attendance']==0)&(df['discipline']==0)])
         ]
     })
+    ws3 = wb.create_sheet("Summary")
+    for r in dataframe_to_rows(summary, index=False, header=True): ws3.append(r)
 
-    st.success("Processing complete!")
+    wb.save(output)
+    output.seek(0)
+    return output
 
-    st.subheader("Classification Matrix")
-    st.dataframe(matrix_df)
 
-    st.subheader("Count Matrix")
-    st.dataframe(count_df)
+# ===== STREAMLIT UI =====
 
-    st.subheader("Student Details with Classification")
+st.title("📊 Employee Classification Matrix")
+st.write("Upload Excel file containing columns: **Name, Discipline, Attendance**")
+
+uploaded = st.file_uploader("Upload Excel File", type=['xlsx'])
+
+if uploaded:
+    df = pd.read_excel(uploaded)
+    st.success("File uploaded successfully!")
     st.dataframe(df)
 
-    # Generate excel with 4 sheets
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name="Student Details")
-        matrix_df.to_excel(writer, sheet_name="Classification Matrix")
-        count_df.to_excel(writer, sheet_name="Count Matrix")
-        summary.to_excel(writer, index=False, sheet_name="Summary")
+    if st.button("Generate Matrix"):
+        result_file = generate_output(df)
+        st.success("Matrix generated!")
 
-    st.download_button(
-        label="📁 Download Result Excel",
-        data=output.getvalue(),
-        file_name="student_classification_output.xlsx"
-    )
+        st.download_button(
+            label="⬇ Download Output Excel",
+            data=result_file,
+            file_name="Employee_classification_output.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
