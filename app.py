@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 import io
 
-st.set_page_config(page_title="Student Classification Matrix", page_icon="📊")
+st.set_page_config(page_title="Employee Classification Matrix", page_icon="📊")
 
-st.title("📊 Student Classification System")
+st.title("📊 Employee Classification System")
 st.write("Upload an Excel file with columns: **Name, Discipline, Attendance**")
 
 uploaded = st.file_uploader("Upload Excel File", type=["xlsx"])
